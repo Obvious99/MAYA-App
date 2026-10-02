@@ -1,0 +1,825 @@
+package com.maya.assistant
+
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
+import android.os.Bundle
+import android.provider.Settings
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
+import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import kotlinx.coroutines.launch
+import java.util.Locale
+import kotlin.math.sin
+
+/**
+ * State machine representing MAYA's operational lifecycle.
+ */
+enum class MayaState {
+    IDLE,
+    LISTENING,
+    PROCESSING,
+    SPEAKING,
+    ERROR
+}
+
+class MainActivity : ComponentActivity(), MayaAudioPlaybackListener {
+
+    private lateinit var networkClient: MayaNetworkClient
+    private var speechRecognizer: SpeechRecognizer? = null
+    private var speechIntent: Intent? = null
+
+    // State holders
+    private val currentState = mutableStateOf(MayaState.IDLE)
+    private val userTranscript = mutableStateOf("")
+    private val mayaResponse = mutableStateOf("Systems initialized. Speak to begin interaction.")
+    private val rmsDbLevel = mutableFloatStateOf(0f)
+    private val activeScreen = mutableStateOf("home") // "home" or "settings"
+
+    // Permission launchers
+    private val requestAudioPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted: Boolean ->
+        if (isGranted) {
+            initializeSpeechRecognizer()
+        } else {
+            Toast.makeText(this, "Microphone permission required for speech interaction", Toast.LENGTH_LONG).show()
+            currentState.value = MayaState.ERROR
+            mayaResponse.value = "Microphone access denied. Grant permission to interact."
+        }
+    }
+
+    private val overlayPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (Settings.canDrawOverlays(this)) {
+                Toast.makeText(this, "Overlay permission granted", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "Overlay permission denied", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        networkClient = MayaNetworkClient(this, this)
+
+        checkAndRequestPermissions()
+
+        setContent {
+            MayaAppTheme {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = Color(0xFF030712)
+                ) {
+                    if (activeScreen.value == "settings") {
+                        SettingsScreen(
+                            onNavigateBack = { activeScreen.value = "home" },
+                            onRequestOverlayPermission = { requestOverlayPermission() }
+                        )
+                    } else {
+                        MayaMainScreen(
+                            state = currentState.value,
+                            transcript = userTranscript.value,
+                            response = mayaResponse.value,
+                            rmsLevel = rmsDbLevel.floatValue,
+                            onMicClicked = { handleMicToggle() },
+                            onOpenSettings = { activeScreen.value = "settings" },
+                            onResetState = { resetToIdle() }
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private fun checkAndRequestPermissions() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        } else {
+            initializeSpeechRecognizer()
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+            // Can be requested explicitly in Settings
+        }
+    }
+
+    private fun requestOverlayPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (!Settings.canDrawOverlays(this)) {
+                val intent = Intent(
+                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:$packageName")
+                )
+                overlayPermissionLauncher.launch(intent)
+            } else {
+                Toast.makeText(this, "Overlay permission already active", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun initializeSpeechRecognizer() {
+        if (SpeechRecognizer.isRecognitionAvailable(this)) {
+            speechRecognizer?.destroy()
+            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
+            speechIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(
+                    RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                    RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+                )
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+            }
+
+            speechRecognizer?.setRecognitionListener(object : RecognitionListener {
+                override fun onReadyForSpeech(params: Bundle?) {
+                    currentState.value = MayaState.LISTENING
+                    userTranscript.value = "Listening to vocal input..."
+                }
+
+                override fun onBeginningOfSpeech() {
+                    currentState.value = MayaState.LISTENING
+                }
+
+                override fun onRmsChanged(rmsdB: Float) {
+                    rmsDbLevel.floatValue = rmsdB.coerceIn(0f, 10f)
+                }
+
+                override fun onBufferReceived(buffer: ByteArray?) {}
+
+                override fun onEndOfSpeech() {
+                    currentState.value = MayaState.PROCESSING
+                }
+
+                override fun onError(error: Int) {
+                    val message = when (error) {
+                        SpeechRecognizer.ERROR_NO_MATCH -> "No speech match detected."
+                        SpeechRecognizer.ERROR_NETWORK -> "Network communication error."
+                        SpeechRecognizer.ERROR_AUDIO -> "Audio recording error."
+                        SpeechRecognizer.ERROR_SERVER -> "Server processing error."
+                        SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Speech timeout. No sound heard."
+                        else -> "Speech recognition fault (Code: $error)"
+                    }
+                    currentState.value = MayaState.ERROR
+                    mayaResponse.value = message
+                }
+
+                override fun onResults(results: Bundle?) {
+                    val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                    val spokenText = matches?.firstOrNull() ?: ""
+                    if (spokenText.isNotBlank()) {
+                        userTranscript.value = spokenText
+                        sendVoiceQueryToBackend(spokenText)
+                    } else {
+                        currentState.value = MayaState.IDLE
+                    }
+                }
+
+                override fun onPartialResults(partialResults: Bundle?) {
+                    val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                    val partial = matches?.firstOrNull()
+                    if (!partial.isNullOrBlank()) {
+                        userTranscript.value = partial
+                    }
+                }
+
+                override fun onEvent(eventType: Int, params: Bundle?) {}
+            })
+        }
+    }
+
+    private fun handleMicToggle() {
+        if (currentState.value == MayaState.LISTENING) {
+            speechRecognizer?.stopListening()
+            currentState.value = MayaState.PROCESSING
+        } else if (currentState.value == MayaState.SPEAKING) {
+            networkClient.stopAudio()
+            currentState.value = MayaState.IDLE
+        } else {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+                == PackageManager.PERMISSION_GRANTED
+            ) {
+                try {
+                    speechRecognizer?.startListening(speechIntent)
+                } catch (e: Exception) {
+                    initializeSpeechRecognizer()
+                    speechRecognizer?.startListening(speechIntent)
+                }
+            } else {
+                requestAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            }
+        }
+    }
+
+    private fun sendVoiceQueryToBackend(query: String) {
+        currentState.value = MayaState.PROCESSING
+        mayaResponse.value = "Translating query through quantum link..."
+
+        val prefs = MayaPreferences(this)
+        val serverUrl = prefs.getServerUrl()
+        val model = prefs.getGeminiModel()
+        val apiKey = prefs.getApiKey()
+
+        networkClient.sendChatRequest(
+            url = serverUrl,
+            message = query,
+            model = model,
+            apiKey = apiKey,
+            onSuccess = { responseText, audioUrl ->
+                runOnUiThread {
+                    mayaResponse.value = responseText
+                    if (audioUrl.isNotBlank()) {
+                        currentState.value = MayaState.SPEAKING
+                        val baseUrl = extractBaseUrl(serverUrl)
+                        networkClient.playAudioStream("$baseUrl$audioUrl")
+                    } else {
+                        currentState.value = MayaState.IDLE
+                    }
+                }
+            },
+            onError = { errorMessage ->
+                runOnUiThread {
+                    currentState.value = MayaState.ERROR
+                    mayaResponse.value = errorMessage
+                }
+            }
+        )
+    }
+
+    private fun extractBaseUrl(fullUrl: String): String {
+        return try {
+            val uri = Uri.parse(fullUrl)
+            "${uri.scheme}://${uri.host}:${uri.port}"
+        } catch (e: Exception) {
+            "http://127.0.0.1:8082"
+        }
+    }
+
+    private fun resetToIdle() {
+        networkClient.stopAudio()
+        speechRecognizer?.cancel()
+        currentState.value = MayaState.IDLE
+        userTranscript.value = ""
+        mayaResponse.value = "Systems operational. Tap microphone or initiate vocal query."
+    }
+
+    override fun onAudioPlaybackStarted() {
+        runOnUiThread {
+            currentState.value = MayaState.SPEAKING
+        }
+    }
+
+    override fun onAudioPlaybackCompleted() {
+        runOnUiThread {
+            currentState.value = MayaState.IDLE
+        }
+    }
+
+    override fun onAudioPlaybackError(error: String) {
+        runOnUiThread {
+            currentState.value = MayaState.ERROR
+            mayaResponse.value = "Playback failure: $error"
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        speechRecognizer?.destroy()
+        networkClient.release()
+    }
+}
+
+/**
+ * Main holographic Compose visual interface for MAYA.
+ */
+@Composable
+fun MayaMainScreen(
+    state: MayaState,
+    transcript: String,
+    response: String,
+    rmsLevel: Float,
+    onMicClicked: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onResetState: () -> Unit
+) {
+    val context = LocalContext.current
+    val prefs = remember { MayaPreferences(context) }
+    val avatarUrl = prefs.getAvatarUrl()
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF02040A))
+    ) {
+        // Holographic Background Grid & Ambiance
+        HolographicGridBackground()
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            // Top Bar
+            MayaTopAppBar(
+                state = state,
+                onOpenSettings = onOpenSettings,
+                onResetState = onResetState
+            )
+
+            // Dynamic Holographic Avatar & Glowing Pedestal Stage
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                contentAlignment = Alignment.Center
+            ) {
+                HolographicAvatarStage(
+                    avatarUrl = avatarUrl,
+                    state = state,
+                    rmsLevel = rmsLevel
+                )
+            }
+
+            // Real-Time Frosted Glass Transcript & Response Interface
+            MayaResponseInterface(
+                state = state,
+                transcript = transcript,
+                response = response
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Action Mic Trigger Orb
+            MayaMicControlSection(
+                state = state,
+                onMicClicked = onMicClicked
+            )
+        }
+    }
+}
+
+/**
+ * Custom Compose canvas drawing the dynamic multi-layered glowing radial pedestal
+ * with real-time sine wave pulsations and audio reactivity.
+ */
+@Composable
+fun HolographicAvatarStage(
+    avatarUrl: String,
+    state: MayaState,
+    rmsLevel: Float
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "pedestalTransition")
+
+    val pulsePhase by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 6.28318f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 2400, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "pedestalSinePulse"
+    )
+
+    val breathingScale by infiniteTransition.animateFloat(
+        initialValue = 0.96f,
+        targetValue = 1.04f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 3200, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "avatarBreathing"
+    )
+
+    val (baseRadiusMultiplier, primaryColor, secondaryColor) = when (state) {
+        MayaState.IDLE -> Triple(1.0f, Color(0xFF00E5FF), Color(0xFFFF007F))
+        MayaState.LISTENING -> Triple(1.35f + (rmsLevel * 0.04f), Color(0xFF00E5FF), Color(0xFF00FF9D))
+        MayaState.PROCESSING -> Triple(1.15f, Color(0xFF9D00FF), Color(0xFF00E5FF))
+        MayaState.SPEAKING -> {
+            val sineFluctuation = 1f + (sin(pulsePhase) * 0.18f)
+            Triple(1.22f * sineFluctuation, Color(0xFFFF007F), Color(0xFF00E5FF))
+        }
+        MayaState.ERROR -> Triple(1.05f, Color(0xFFFF1744), Color(0xFFFF5252))
+    }
+
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(280.dp)
+                .align(Alignment.BottomCenter)
+        ) {
+            val centerX = size.width / 2f
+            val centerY = size.height * 0.72f
+            val baseRadius = (size.width * 0.38f) * baseRadiusMultiplier
+
+            // Outer ethereal aura
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        secondaryColor.copy(alpha = 0.45f),
+                        primaryColor.copy(alpha = 0.22f),
+                        Color.Transparent
+                    ),
+                    center = Offset(centerX, centerY),
+                    radius = baseRadius * 1.5f
+                ),
+                center = Offset(centerX, centerY),
+                radius = baseRadius * 1.5f
+            )
+
+            // Middle high-energy plasma ring
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        primaryColor.copy(alpha = 0.85f),
+                        secondaryColor.copy(alpha = 0.40f),
+                        Color.Transparent
+                    ),
+                    center = Offset(centerX, centerY),
+                    radius = baseRadius
+                ),
+                center = Offset(centerX, centerY),
+                radius = baseRadius
+            )
+
+            // Geometric concentric pedestal holographic rings
+            val ringStrokeWidth = 3.dp.toPx()
+            drawCircle(
+                color = primaryColor.copy(alpha = 0.7f),
+                radius = baseRadius * 0.85f,
+                center = Offset(centerX, centerY),
+                style = Stroke(width = ringStrokeWidth)
+            )
+
+            drawCircle(
+                color = secondaryColor.copy(alpha = 0.6f),
+                radius = baseRadius * 0.55f,
+                center = Offset(centerX, centerY),
+                style = Stroke(width = ringStrokeWidth * 0.75f)
+            )
+
+            // Inner core bright focal spot
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        Color.White.copy(alpha = 0.95f),
+                        primaryColor.copy(alpha = 0.8f),
+                        Color.Transparent
+                    ),
+                    center = Offset(centerX, centerY),
+                    radius = baseRadius * 0.28f
+                ),
+                center = Offset(centerX, centerY),
+                radius = baseRadius * 0.28f
+            )
+        }
+
+        val avatarModifier = Modifier
+            .fillMaxSize(0.88f)
+            .scale(breathingScale)
+            .padding(bottom = 32.dp)
+
+        AsyncImage(
+            model = ImageRequest.Builder(LocalContext.current)
+                .data(avatarUrl)
+                .crossfade(true)
+                .build(),
+            contentDescription = "MAYA Hologram Avatar",
+            contentScale = ContentScale.Fit,
+            modifier = avatarModifier
+        )
+    }
+}
+
+@Composable
+fun MayaResponseInterface(
+    state: MayaState,
+    transcript: String,
+    response: String
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(Color(0xFF0F172A).copy(alpha = 0.75f))
+            .border(
+                width = 1.dp,
+                brush = Brush.horizontalGradient(
+                    colors = listOf(
+                        Color(0xFF00E5FF).copy(alpha = 0.6f),
+                        Color(0xFFFF007F).copy(alpha = 0.4f),
+                        Color(0xFF00E5FF).copy(alpha = 0.2f)
+                    )
+                ),
+                shape = RoundedCornerShape(24.dp)
+            )
+            .padding(18.dp)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(
+                                when (state) {
+                                    MayaState.IDLE -> Color(0xFF00E5FF)
+                                    MayaState.LISTENING -> Color(0xFF00FF9D)
+                                    MayaState.PROCESSING -> Color(0xFF9D00FF)
+                                    MayaState.SPEAKING -> Color(0xFFFF007F)
+                                    MayaState.ERROR -> Color(0xFFFF1744)
+                                }
+                            )
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "MAYA // " + state.name,
+                        color = Color(0xFF94A3B8),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        fontFamily = FontFamily.Monospace,
+                        letterSpacing = 1.sp
+                    )
+                }
+
+                if (state == MayaState.SPEAKING) {
+                    AudioWaveformIndicator()
+                }
+            }
+
+            if (transcript.isNotBlank()) {
+                Text(
+                    text = "\"" + transcript + "\"",
+                    color = Color(0xFFE2E8F0),
+                    fontSize = 14.sp,
+                    fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            Text(
+                text = response,
+                color = Color.White,
+                fontSize = 16.sp,
+                lineHeight = 22.sp,
+                fontWeight = FontWeight.Normal,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    }
+}
+
+@Composable
+fun MayaMicControlSection(
+    state: MayaState,
+    onMicClicked: () -> Unit
+) {
+    val micColor = when (state) {
+        MayaState.IDLE -> Color(0xFF00E5FF)
+        MayaState.LISTENING -> Color(0xFF00FF9D)
+        MayaState.PROCESSING -> Color(0xFF9D00FF)
+        MayaState.SPEAKING -> Color(0xFFFF007F)
+        MayaState.ERROR -> Color(0xFFFF1744)
+    }
+
+    Box(
+        modifier = Modifier
+            .size(76.dp)
+            .clip(CircleShape)
+            .background(
+                Brush.radialGradient(
+                    colors = listOf(
+                        micColor.copy(alpha = 0.35f),
+                        Color.Transparent
+                    )
+                )
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .size(62.dp)
+                .clip(CircleShape)
+                .background(Color(0xFF0B1120))
+                .border(2.dp, micColor, CircleShape)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onMicClicked
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = when (state) {
+                    MayaState.ERROR -> Icons.Default.MicOff
+                    MayaState.SPEAKING -> Icons.Default.VolumeUp
+                    else -> Icons.Default.Mic
+                },
+                contentDescription = "Voice Control",
+                tint = micColor,
+                modifier = Modifier.size(30.dp)
+            )
+        }
+    }
+}
+
+@Composable
+fun MayaTopAppBar(
+    state: MayaState,
+    onOpenSettings: () -> Unit,
+    onResetState: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column {
+            Text(
+                text = "MAYA AI",
+                color = Color.White,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 2.sp
+            )
+            Text(
+                text = "LOCAL QUANTUM CORE",
+                color = Color(0xFF00E5FF),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Medium,
+                fontFamily = FontFamily.Monospace
+            )
+        }
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onResetState) {
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = "Reset State",
+                    tint = Color(0xFF94A3B8)
+                )
+            }
+            IconButton(onClick = onOpenSettings) {
+                Icon(
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = "Settings",
+                    tint = Color(0xFF00E5FF)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun AudioWaveformIndicator() {
+    val transition = rememberInfiniteTransition(label = "waveform")
+    val h1 by transition.animateFloat(
+        initialValue = 4f,
+        targetValue = 16f,
+        animationSpec = infiniteRepeatable(tween(300, easing = LinearEasing), RepeatMode.Reverse),
+        label = "w1"
+    )
+    val h2 by transition.animateFloat(
+        initialValue = 14f,
+        targetValue = 6f,
+        animationSpec = infiniteRepeatable(tween(420, easing = LinearEasing), RepeatMode.Reverse),
+        label = "w2"
+    )
+    val h3 by transition.animateFloat(
+        initialValue = 6f,
+        targetValue = 18f,
+        animationSpec = infiniteRepeatable(tween(260, easing = LinearEasing), RepeatMode.Reverse),
+        label = "w3"
+    )
+
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(modifier = Modifier.width(3.dp).height(h1.dp).background(Color(0xFFFF007F), RoundedCornerShape(2.dp)))
+        Box(modifier = Modifier.width(3.dp).height(h2.dp).background(Color(0xFF00E5FF), RoundedCornerShape(2.dp)))
+        Box(modifier = Modifier.width(3.dp).height(h3.dp).background(Color(0xFFFF007F), RoundedCornerShape(2.dp)))
+    }
+}
+
+@Composable
+fun HolographicGridBackground() {
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        val gridColor = Color(0xFF00E5FF).copy(alpha = 0.04f)
+        val step = 40.dp.toPx()
+        for (x in 0..(size.width / step).toInt()) {
+            drawLine(
+                color = gridColor,
+                start = Offset(x * step, 0f),
+                end = Offset(x * step, size.height),
+                strokeWidth = 1f
+            )
+        }
+        for (y in 0..(size.height / step).toInt()) {
+            drawLine(
+                color = gridColor,
+                start = Offset(0f, y * step),
+                end = Offset(size.width, y * step),
+                strokeWidth = 1f
+            )
+        }
+    }
+}
+
+@Composable
+fun MayaAppTheme(content: @Composable () -> Unit) {
+    content()
+}

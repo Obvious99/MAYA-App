@@ -1,18 +1,13 @@
-# MAYA - Cyberpunk Native Android AI Assistant
+# MAYA - Native Android AI Assistant
+Production-grade native Android client and local Termux companion core.
 
-A complete, production-ready Android Studio project written in **Kotlin** & **Jetpack Compose** featuring:
-- Dynamic Holographic Pedestal Canvas with glowing radial gradients (#00E5FF cyan and #FF007F pink)
-- Draggable Floating System Overlay Orb (Foreground Service with WindowManager TYPE_APPLICATION_OVERLAY)
-- Local Termux Python Bridge (OkHttp client streaming audio to http://127.0.0.1:8082)
-- Gemini Neural Engine integration with live speech recognition & playback
-
-## Quick Setup:
-1. Open this project in **Android Studio Hedgehog / Iguana / Jellyfish or Ladybug**.
-2. Sync Gradle files (JDK 17).
-3. In Termux on Android, run the included backend:
+## Setup Instructions:
+1. Open this root directory in Android Studio (Giraffe / Hedgehog / Iguana / Koala / Ladybug).
+2. Sync Gradle files.
+3. Build & Run on an Android device or emulator with minSdk 26+ (recommended Android 10+).
+4. Run the Termux companion server on Android or localhost:
    ```bash
-   pkg update && pkg install python ffmpeg
-   pip install flask flask-cors gtts requests google-genai
-   python termux/server.py
+   python termux/termux_server.py
    ```
-4. Run the app on your Android device or emulator.
+5. In MAYA App Settings, confirm the Chat endpoint is:
+   `http://127.0.0.1:8082/chat`
