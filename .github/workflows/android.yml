@@ -17,9 +17,11 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
-          cache: gradle
 
-      - name: Grant Execute Permission for Gradle
+      - name: Generate Gradle Wrapper
+        run: gradle wrapper
+
+      - name: Grant Execute Permission
         run: chmod +x gradlew
 
       - name: Build Debug APK
