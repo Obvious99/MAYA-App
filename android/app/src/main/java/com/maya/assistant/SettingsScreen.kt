@@ -74,7 +74,7 @@ class MayaPreferences(context: Context) {
 
         const val DEFAULT_SERVER_URL = "http://127.0.0.1:8082/chat"
         const val DEFAULT_AVATAR_URL = "http://127.0.0.1:8082/avatar.png"
-        const val DEFAULT_MODEL = "gemini-2.5-flash"
+        const val DEFAULT_MODEL = "gemini-3.5-flash-lite"
     }
 
     fun getServerUrl(): String = prefs.getString(KEY_SERVER_URL, DEFAULT_SERVER_URL) ?: DEFAULT_SERVER_URL
@@ -116,9 +116,9 @@ fun SettingsScreen(
     var showApiKeyText by remember { mutableStateOf(false) }
 
     val modelOptions = listOf(
-        "gemini-2.5-flash",
-        "gemini-1.5-flash",
-        "gemini-1.5-pro"
+        "gemini-3.5-flash-lite",
+        "gemini-3.5-flash-lite",
+        "gemini-3.6-flash"
     )
 
     val scrollState = rememberScrollState()
