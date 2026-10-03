@@ -415,8 +415,7 @@ fun MayaMainScreen(
             ) {
                 HolographicAvatarStage(
                     state = state,
-                    rmsLevel = rmsLevel,
-                    onMicClicked = onMicClicked
+                    rmsLevel = rmsLevel
                 )
             }
 
@@ -441,40 +440,36 @@ fun MayaMainScreen(
 @Composable
 fun HolographicAvatarStage(
     state: MayaState,
-    rmsLevel: Float,
-    onMicClicked: () -> Unit
+    rmsLevel: Float
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "pedestalTransition")
+    val transition = rememberInfiniteTransition(label = "avatarGlow")
 
-    val pulsePhase by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 6.28318f,
+    val glowPulse by transition.animateFloat(
+        initialValue = 0.75f,
+        targetValue = 1.0f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 2400, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
+            animation = tween(1800, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
         ),
-        label = "pedestalSinePulse"
+        label = "glowPulse"
     )
 
-    val breathingScale by infiniteTransition.animateFloat(
-        initialValue = 0.96f,
-        targetValue = 1.04f,
+    val breathingScale by transition.animateFloat(
+        initialValue = 0.98f,
+        targetValue = 1.02f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 3200, easing = FastOutSlowInEasing),
+            animation = tween(2600, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label = "avatarBreathing"
     )
 
-    val (baseRadiusMultiplier, primaryColor, secondaryColor) = when (state) {
-        MayaState.IDLE -> Triple(1.0f, Color(0xFF00E5FF), Color(0xFFFF007F))
-        MayaState.LISTENING -> Triple(1.35f + (rmsLevel * 0.04f), Color(0xFF00E5FF), Color(0xFF00FF9D))
-        MayaState.PROCESSING -> Triple(1.15f, Color(0xFF9D00FF), Color(0xFF00E5FF))
-        MayaState.SPEAKING -> {
-            val sineFluctuation = 1f + (sin(pulsePhase) * 0.18f)
-            Triple(1.22f * sineFluctuation, Color(0xFFFF007F), Color(0xFF00E5FF))
-        }
-        MayaState.ERROR -> Triple(1.05f, Color(0xFFFF1744), Color(0xFFFF5252))
+    val glowColor = when (state) {
+        MayaState.LISTENING -> Color(0xFF00F3FF)
+        MayaState.PROCESSING -> Color(0xFFBA55D3)
+        MayaState.SPEAKING -> Color(0xFFD900FF)
+        MayaState.ERROR -> Color(0xFFFF3366)
+        MayaState.IDLE -> Color(0xFFBA55D3)
     }
 
     Box(
@@ -484,85 +479,40 @@ fun HolographicAvatarStage(
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(280.dp)
-                .align(Alignment.BottomCenter)
+                .height(340.dp)
         ) {
-            val centerX = size.width / 2f
-            val centerY = size.height * 0.72f
-            val baseRadius = (size.width * 0.38f) * baseRadiusMultiplier
+            val center = Offset(size.width / 2f, size.height / 2f)
+            val radius = size.minDimension * 0.30f
 
-            // Outer ethereal aura
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(
-                        secondaryColor.copy(alpha = 0.45f),
-                        primaryColor.copy(alpha = 0.22f),
+                        glowColor.copy(alpha = 0.28f * glowPulse),
+                        glowColor.copy(alpha = 0.12f * glowPulse),
                         Color.Transparent
                     ),
-                    center = Offset(centerX, centerY),
-                    radius = baseRadius * 1.5f
+                    center = center,
+                    radius = radius * 1.9f
                 ),
-                center = Offset(centerX, centerY),
-                radius = baseRadius * 1.5f
-            )
-
-            // Middle high-energy plasma ring
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(
-                        primaryColor.copy(alpha = 0.85f),
-                        secondaryColor.copy(alpha = 0.40f),
-                        Color.Transparent
-                    ),
-                    center = Offset(centerX, centerY),
-                    radius = baseRadius
-                ),
-                center = Offset(centerX, centerY),
-                radius = baseRadius
-            )
-
-            // Geometric concentric pedestal holographic rings
-            val ringStrokeWidth = 3.dp.toPx()
-            drawCircle(
-                color = primaryColor.copy(alpha = 0.7f),
-                radius = baseRadius * 0.85f,
-                center = Offset(centerX, centerY),
-                style = Stroke(width = ringStrokeWidth)
+                center = center,
+                radius = radius * 1.9f
             )
 
             drawCircle(
-                color = secondaryColor.copy(alpha = 0.6f),
-                radius = baseRadius * 0.55f,
-                center = Offset(centerX, centerY),
-                style = Stroke(width = ringStrokeWidth * 0.75f)
-            )
-
-            // Inner core bright focal spot
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(
-                        Color.White.copy(alpha = 0.95f),
-                        primaryColor.copy(alpha = 0.8f),
-                        Color.Transparent
-                    ),
-                    center = Offset(centerX, centerY),
-                    radius = baseRadius * 0.28f
-                ),
-                center = Offset(centerX, centerY),
-                radius = baseRadius * 0.28f
+                color = glowColor.copy(alpha = 0.35f * glowPulse),
+                center = center,
+                radius = radius * 1.25f,
+                style = Stroke(width = 2.dp.toPx())
             )
         }
 
-        val avatarModifier = Modifier
-            .fillMaxSize(0.53f)
-            .scale(breathingScale)
-            .padding(bottom = 32.dp)
-
         AsyncImage(
             model = R.drawable.maya,
-            contentDescription = "MAYA Hologram Avatar",
+            contentDescription = "MAYA Avatar",
             contentScale = ContentScale.Fit,
-            modifier = avatarModifier.clickable(onClick = onMicClicked)
+            modifier = Modifier
+                .fillMaxSize(0.82f)
+                .scale(breathingScale)
         )
     }
 }
@@ -674,6 +624,8 @@ fun MayaResponseInterface(
             }
         }
     }
+
+}
 
 @Composable
 fun MayaTopAppBar(
