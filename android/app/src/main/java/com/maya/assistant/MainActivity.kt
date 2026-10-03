@@ -25,21 +25,25 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.random.Random
 
-// Cyberpunk Palette
-val DarkBg = Color(0xFF0A0014)
-val SurfacePurple = Color(0xFF16022B)
-val NeonPurple = Color(0xFFBF00FF)
-val NeonPink = Color(0xFFFF007F)
-val CyberCyan = Color(0xFF00F0FF)
+// Cyberpunk Palette from index.html
+val DarkBg = Color(0xFF080314)
+val SurfacePurple = Color(0xFF0F081E)
+val NeonPurple = Color(0xFFB000FF)
+val CyberCyan = Color(0xFF00FFCC)
+val StatusRed = Color(0xFFFF0055)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -54,7 +58,7 @@ class MainActivity : ComponentActivity() {
                 )
             ) {
                 Surface(modifier = Modifier.fillMaxSize(), color = DarkBg) {
-                    MayaMainScreen(
+                    MayaMainHUD(
                         onSettingsClick = { openSettings() },
                         onOverlayClick = { requestOverlayPermissionAndStart() }
                     )
@@ -89,83 +93,105 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun StarBackground() {
+fun HUDStarfieldCanvas() {
     val infiniteTransition = rememberInfiniteTransition(label = "stars")
     val alphaAnim by infiniteTransition.animateFloat(
-        initialValue = 0.2f,
-        targetValue = 0.9f,
+        initialValue = 0.3f,
+        targetValue = 0.95f,
         animationSpec = infiniteRepeatable(
-            animation = tween(2000, easing = LinearEasing),
+            animation = tween(1800, easing = LinearEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label = "star_alpha"
     )
 
     val stars = remember {
-        List(50) {
+        List(40) {
             Offset(Random.nextFloat(), Random.nextFloat())
         }
     }
 
     Canvas(modifier = Modifier.fillMaxSize()) {
-        val width = size.width
-        val height = size.height
+        val w = size.width
+        val h = size.height
+
+        // Radial Background Glow
+        drawRect(
+            brush = Brush.radialGradient(
+                colors = listOf(Color(0x4D8C00FF), Color(0xF205020C)),
+                center = Offset(w / 2, h / 2),
+                radius = w.coerceAtLeast(h) * 0.75f
+            )
+        )
+
+        // Floating Stars
         stars.forEachIndexed { index, pos ->
-            val starAlpha = if (index % 2 == 0) alphaAnim else (1f - alphaAnim)
+            val starAlpha = if (index % 2 == 0) alphaAnim else (1.2f - alphaAnim).coerceIn(0.2f, 1f)
             drawCircle(
-                color = Color.White.copy(alpha = starAlpha * 0.8f),
+                color = CyberCyan.copy(alpha = starAlpha * 0.75f),
                 radius = if (index % 3 == 0) 2.5f else 1.5f,
-                center = Offset(pos.x * width, pos.y * height)
+                center = Offset(pos.x * w, pos.y * h)
             )
         }
     }
 }
 
 @Composable
-fun MayaMainScreen(
+fun MayaMainHUD(
     onSettingsClick: () -> Unit,
     onOverlayClick: () -> Unit
 ) {
     var isListening by remember { mutableStateOf(false) }
-    var statusText by remember { mutableStateOf("Tap MAYA to speak. All neural systems online.") }
+    var statusHeaderText by remember { mutableStateOf("MAYA // HUD") }
 
     Box(modifier = Modifier.fillMaxSize().background(DarkBg)) {
-        // Starfield background effect
-        StarBackground()
+        // Dynamic Starfield
+        HUDStarfieldCanvas()
 
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(20.dp),
+                .padding(horizontal = 16.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // Header
-            Row(
+            // Header Bar
+            Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 12.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                    .border(1.dp, NeonPurple.copy(alpha = 0.8f), RoundedCornerShape(8.dp)),
+                color = SurfacePurple.copy(alpha = 0.75f),
+                shape = RoundedCornerShape(8.dp)
             ) {
-                Column {
-                    Text("MAYA AI", color = Color.White, fontSize = 22.sp)
-                    Text("LOCAL QUANTUM CORE", color = CyberCyan, fontSize = 11.sp)
-                }
-                Row {
-                    IconButton(onClick = onOverlayClick) {
-                        Icon(Icons.Default.PictureInPicture, contentDescription = "Floating Overlay", tint = CyberCyan)
-                    }
-                    IconButton(onClick = { statusText = "System refreshed. Neural memory re-indexed." }) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = CyberCyan)
-                    }
-                    IconButton(onClick = onSettingsClick) {
-                        Icon(Icons.Default.Settings, contentDescription = "Settings", tint = CyberCyan)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = statusHeaderText,
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                    Row {
+                        IconButton(onClick = onOverlayClick) {
+                            Icon(Icons.Default.PictureInPicture, contentDescription = "Floating Overlay", tint = CyberCyan)
+                        }
+                        IconButton(onClick = { statusHeaderText = "MAYA // REFRESHED" }) {
+                            Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = CyberCyan)
+                        }
+                        IconButton(onClick = onSettingsClick) {
+                            Icon(Icons.Default.Settings, contentDescription = "Settings", tint = CyberCyan)
+                        }
                     }
                 }
             }
 
-            // Clickable Full Avatar with Deep Purple Back-Glow
+            // Central Viewport: Full Body Maya Avatar (Uncropped)
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
@@ -173,57 +199,42 @@ fun MayaMainScreen(
                     .fillMaxWidth()
                     .clickable {
                         isListening = !isListening
-                        statusText = if (isListening) "Listening... Speak now." else "Processing speech... Awaiting response."
+                        statusHeaderText = if (isListening) "MAYA // LISTENING..." else "MAYA // HUD"
                     }
             ) {
-                // Background radial glow
+                // Background Soft Glow
                 Box(
                     modifier = Modifier
-                        .size(300.dp)
+                        .size(320.dp)
                         .background(
                             Brush.radialGradient(
                                 colors = listOf(
-                                    if (isListening) NeonPink.copy(alpha = 0.6f) else NeonPurple.copy(alpha = 0.5f),
-                                    CyberCyan.copy(alpha = 0.2f),
+                                    if (isListening) StatusRed.copy(alpha = 0.5f) else NeonPurple.copy(alpha = 0.45f),
                                     Color.Transparent
                                 )
                             )
                         )
                 )
 
-                // Maya Avatar rendered without circular clipping
+                // Avatar Image
                 Image(
                     painter = painterResource(id = R.drawable.maya),
-                    contentDescription = "Tap MAYA to activate voice input",
+                    contentDescription = "MAYA HUD Viewport",
                     contentScale = ContentScale.Fit,
                     modifier = Modifier
-                        .fillMaxHeight(0.88f)
+                        .fillMaxHeight(0.92f)
                         .fillMaxWidth()
                 )
             }
 
-            // Status Console Card
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = SurfacePurple.copy(alpha = 0.85f)),
+            // Bottom HUD Status Indicator Dot
+            Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .border(1.dp, if (isListening) NeonPink else NeonPurple, RoundedCornerShape(16.dp))
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        if (isListening) "● MAYA // LISTENING..." else "● MAYA // IDLE (TAP AVATAR TO SPEAK)",
-                        color = if (isListening) NeonPink else CyberCyan,
-                        fontSize = 11.sp
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        statusText,
-                        color = Color.White,
-                        fontSize = 14.sp
-                    )
-                }
-            }
+                    .padding(bottom = 8.dp)
+                    .size(10.dp)
+                    .clip(CircleShape)
+                    .background(if (isListening) StatusRed else CyberCyan)
+            )
         }
     }
 }
