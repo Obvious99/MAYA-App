@@ -440,9 +440,9 @@ fun MayaMainScreen(
  */
 @Composable
 fun HolographicAvatarStage(
-    avatarUrl: String,
     state: MayaState,
-    rmsLevel: Float
+    rmsLevel: Float,
+    onMicClicked: () -> Unit
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "pedestalTransition")
 
@@ -674,4 +674,79 @@ fun MayaResponseInterface(
             }
         }
     }
+
+fun MayaTopAppBar(
+    state: MayaState,
+    onOpenSettings: () -> Unit,
+    onResetState: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column {
+            Text(
+                text = "MAYA AI",
+                color = Color.White,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 2.sp
+            )
+            Text(
+                text = "LOCAL QUANTUM CORE",
+                color = Color(0xFF00E5FF),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Medium,
+                fontFamily = FontFamily.Monospace
+            )
+        }
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onResetState) {
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = "Reset State",
+                    tint = Color(0xFF94A3B8)
+                )
+            }
+            IconButton(onClick = onOpenSettings) {
+                Icon(
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = "Settings",
+                    tint = Color(0xFF00E5FF)
+                )
+            }
+        }
+    }
+}
+
+fun HolographicGridBackground() {
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        val gridColor = Color(0xFF00E5FF).copy(alpha = 0.04f)
+        val step = 40.dp.toPx()
+        for (x in 0..(size.width / step).toInt()) {
+            drawLine(
+                color = gridColor,
+                start = Offset(x * step, 0f),
+                end = Offset(x * step, size.height),
+                strokeWidth = 1f
+            )
+        }
+        for (y in 0..(size.height / step).toInt()) {
+            drawLine(
+                color = gridColor,
+                start = Offset(0f, y * step),
+                end = Offset(size.width, y * step),
+                strokeWidth = 1f
+            )
+        }
+    }
+}
+
+fun MayaAppTheme(content: @Composable () -> Unit) {
+    content()
+}
 }
