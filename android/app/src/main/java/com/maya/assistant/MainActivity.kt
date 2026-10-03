@@ -415,7 +415,8 @@ fun MayaMainScreen(
             ) {
                 HolographicAvatarStage(
                     state = state,
-                    rmsLevel = rmsLevel
+                    rmsLevel = rmsLevel,
+                    onMicClicked = onMicClicked
                 )
             }
 
@@ -440,7 +441,8 @@ fun MayaMainScreen(
 @Composable
 fun HolographicAvatarStage(
     state: MayaState,
-    rmsLevel: Float
+    rmsLevel: Float,
+    onMicClicked: () -> Unit
 ) {
     val transition = rememberInfiniteTransition(label = "avatarGlow")
 
@@ -513,6 +515,7 @@ fun HolographicAvatarStage(
             modifier = Modifier
                 .fillMaxSize(0.82f)
                 .scale(breathingScale)
+                .clickable { onMicClicked() }
         )
     }
 }
