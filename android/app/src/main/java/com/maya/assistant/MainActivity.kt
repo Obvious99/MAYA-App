@@ -675,6 +675,7 @@ fun MayaResponseInterface(
         }
     }
 
+@Composable
 fun MayaTopAppBar(
     state: MayaState,
     onOpenSettings: () -> Unit,
@@ -723,6 +724,7 @@ fun MayaTopAppBar(
     }
 }
 
+@Composable
 fun HolographicGridBackground() {
     Canvas(modifier = Modifier.fillMaxSize()) {
         val gridColor = Color(0xFF00E5FF).copy(alpha = 0.04f)
@@ -746,6 +748,7 @@ fun HolographicGridBackground() {
     }
 }
 
+@Composable
 fun MayaAppTheme(content: @Composable () -> Unit) {
     content()
 }
