@@ -383,8 +383,6 @@ fun MayaMainScreen(
     onResetState: () -> Unit
 ) {
     val context = LocalContext.current
-    val prefs = remember { MayaPreferences(context) }
-    val avatarUrl = prefs.getAvatarUrl()
 
     Box(
         modifier = Modifier
@@ -416,9 +414,9 @@ fun MayaMainScreen(
                 contentAlignment = Alignment.Center
             ) {
                 HolographicAvatarStage(
-                    avatarUrl = avatarUrl,
                     state = state,
-                    rmsLevel = rmsLevel
+                    rmsLevel = rmsLevel,
+                    onMicClicked = onMicClicked
                 )
             }
 
@@ -432,11 +430,6 @@ fun MayaMainScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Action Mic Trigger Orb
-            MayaMicControlSection(
-                state = state,
-                onMicClicked = onMicClicked
-            )
         }
     }
 }
@@ -561,18 +554,15 @@ fun HolographicAvatarStage(
         }
 
         val avatarModifier = Modifier
-            .fillMaxSize(0.88f)
+            .fillMaxSize(0.53f)
             .scale(breathingScale)
             .padding(bottom = 32.dp)
 
         AsyncImage(
-            model = ImageRequest.Builder(LocalContext.current)
-                .data(avatarUrl)
-                .crossfade(true)
-                .build(),
+            model = R.drawable.maya,
             contentDescription = "MAYA Hologram Avatar",
             contentScale = ContentScale.Fit,
-            modifier = avatarModifier
+            modifier = avatarModifier.clickable(onClick = onMicClicked)
         )
     }
 }
@@ -595,7 +585,7 @@ fun MayaResponseInterface(
                 .clip(RoundedCornerShape(4.dp))
                 .background(Color(0xDD0D021A))
                 .border(1.dp, Color(0xFFBA55D3), RoundedCornerShape(4.dp))
-                .padding(12.dp)
+                .padding(horizontal = 10.dp, vertical = 7.dp)
         ) {
             Column(
                 modifier = Modifier.fillMaxWidth(),
@@ -617,7 +607,7 @@ fun MayaResponseInterface(
                 )
 
                 if (transcript.isNotBlank()) {
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(3.dp))
                     Text(
                         text = "> $transcript",
                         color = Color(0xFFBA55D3),
@@ -630,7 +620,7 @@ fun MayaResponseInterface(
             }
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(6.dp))
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -684,185 +674,4 @@ fun MayaResponseInterface(
             }
         }
     }
-}
-
-@Composable
-fun MayaMicControlSection(
-    state: MayaState,
-    onMicClicked: () -> Unit
-) {
-    val micColor = when (state) {
-        MayaState.IDLE -> Color(0xFF00E5FF)
-        MayaState.LISTENING -> Color(0xFF00FF9D)
-        MayaState.PROCESSING -> Color(0xFF9D00FF)
-        MayaState.SPEAKING -> Color(0xFFFF007F)
-        MayaState.ERROR -> Color(0xFFFF1744)
-    }
-
-    Box(
-        modifier = Modifier
-            .size(76.dp)
-            .clip(CircleShape)
-            .background(
-                Brush.radialGradient(
-                    colors = listOf(
-                        micColor.copy(alpha = 0.35f),
-                        Color.Transparent
-                    )
-                )
-            ),
-        contentAlignment = Alignment.Center
-    ) {
-        Box(
-            modifier = Modifier
-                .size(62.dp)
-                .clip(CircleShape)
-                .background(Color(0xFF0B1120))
-                .border(2.dp, micColor, CircleShape)
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = onMicClicked
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = when (state) {
-                    MayaState.ERROR -> Icons.Default.MicOff
-                    MayaState.SPEAKING -> Icons.Default.VolumeUp
-                    else -> Icons.Default.Mic
-                },
-                contentDescription = "Voice Control",
-                tint = micColor,
-                modifier = Modifier.size(30.dp)
-            )
-        }
-    }
-}
-
-@Composable
-fun MayaTopAppBar(
-    state: MayaState,
-    onOpenSettings: () -> Unit,
-    onResetState: () -> Unit
-) {
-    Column(
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "MAYA // HUD",
-                color = Color(0xFF00F3FF),
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
-                letterSpacing = 1.sp
-            )
-
-            Row(
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onResetState) {
-                    Icon(
-                        imageVector = Icons.Default.Refresh,
-                        contentDescription = "Reset",
-                        tint = Color(0xFFBA55D3)
-                    )
-                }
-
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(3.dp))
-                        .background(Color(0x1ABA55D3))
-                        .border(1.dp, Color(0xFFBA55D3), RoundedCornerShape(3.dp))
-                        .clickable(onClick = onOpenSettings)
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                ) {
-                    Text(
-                        text = "⚙ CONFIG",
-                        color = Color(0xFFBA55D3),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace
-                    )
-                }
-            }
-        }
-
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(2.dp)
-                .background(Color(0xFFBA55D3))
-        )
-    }
-}
-
-@Composable
-fun AudioWaveformIndicator() {
-    val transition = rememberInfiniteTransition(label = "waveform")
-    val h1 by transition.animateFloat(
-        initialValue = 4f,
-        targetValue = 16f,
-        animationSpec = infiniteRepeatable(tween(300, easing = LinearEasing), RepeatMode.Reverse),
-        label = "w1"
-    )
-    val h2 by transition.animateFloat(
-        initialValue = 14f,
-        targetValue = 6f,
-        animationSpec = infiniteRepeatable(tween(420, easing = LinearEasing), RepeatMode.Reverse),
-        label = "w2"
-    )
-    val h3 by transition.animateFloat(
-        initialValue = 6f,
-        targetValue = 18f,
-        animationSpec = infiniteRepeatable(tween(260, easing = LinearEasing), RepeatMode.Reverse),
-        label = "w3"
-    )
-
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(modifier = Modifier.width(3.dp).height(h1.dp).background(Color(0xFFFF007F), RoundedCornerShape(2.dp)))
-        Box(modifier = Modifier.width(3.dp).height(h2.dp).background(Color(0xFF00E5FF), RoundedCornerShape(2.dp)))
-        Box(modifier = Modifier.width(3.dp).height(h3.dp).background(Color(0xFFFF007F), RoundedCornerShape(2.dp)))
-    }
-}
-
-@Composable
-fun HolographicGridBackground() {
-    Canvas(modifier = Modifier.fillMaxSize()) {
-        val gridColor = Color(0xFFBA55D3).copy(alpha = 0.10f)
-        val step = 20.dp.toPx()
-
-        for (x in 0..(size.width / step).toInt()) {
-            drawLine(
-                color = gridColor,
-                start = Offset(x * step, 0f),
-                end = Offset(x * step, size.height),
-                strokeWidth = 1f
-            )
-        }
-
-        for (y in 0..(size.height / step).toInt()) {
-            drawLine(
-                color = gridColor,
-                start = Offset(0f, y * step),
-                end = Offset(size.width, y * step),
-                strokeWidth = 1f
-            )
-        }
-    }
-}
-
-@Composable
-fun MayaAppTheme(content: @Composable () -> Unit) {
-    content()
 }
