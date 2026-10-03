@@ -752,4 +752,4 @@ fun HolographicGridBackground() {
 fun MayaAppTheme(content: @Composable () -> Unit) {
     content()
 }
-}
+
