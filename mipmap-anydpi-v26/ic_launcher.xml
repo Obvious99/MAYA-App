@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@drawable/ic_The stack trace shows that AAPT2 is still failing during resource linking (`processResources` / `LinkApplicationAndroidResourcesTask`), but the specific error message isn't visible in the short stack trace above.
+
+AAPT2 usually fails at this step for one of three specific reasons:
+
+1. **Malformed XML syntax** in one of the new files (e.g., missing closing tags or wrong root tags).
+2. **Missing launcher icon file/drawable** if `AndroidManifest.xml` still references `@mipmap/ic_launcher` or `@mipmap/ic_launcher_round`.
+3. **Missing default values directory** or conflict in XML structure.
+
+Here is a comprehensive script to verify and write all required resource files safely, including placeholder icons:
+
+### Run this script in Termux:
+
+```bash
+cd ~/maya-workspace/android/app/src/main/res
+
+# Create all necessary resource directories
+mkdir -p values xml mipmap-hdpi mipmap-mdpi mipmap-xhdpi mipmap-xxhdpi mipmap-xxxhdpi
+
+# 1. Clean overwrite strings.xml
+cat << 'EOF' > values/strings.xml
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">MAYA Assistant</string>
+</resources>
