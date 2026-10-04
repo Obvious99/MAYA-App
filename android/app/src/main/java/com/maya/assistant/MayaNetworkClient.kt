@@ -44,12 +44,25 @@ class MayaNetworkClient(
         message: String,
         model: String,
         apiKey: String,
-        onSuccess: (text: String, audioUrl: String) -> Unit,
+        latitude: Double? = null,
+        longitude: Double? = null,
+        imageUri: String? = null,
+        imageBase64: String? = null,
+        onSuccess: (text: String, audioUrl: String, action: JSONObject?) -> Unit,
         onError: (errorMessage: String) -> Unit
     ) {
         val payloadJson = JSONObject().apply {
             put("message", message)
             put("model", model)
+            if (latitude != null && longitude != null) {
+                put("latitude", latitude)
+                put("longitude", longitude)
+            }
+            if (!imageBase64.isNullOrBlank()) {
+                put("image_base64", imageBase64)
+            } else if (!imageUri.isNullOrBlank()) {
+                put("image_uri", imageUri)
+            }
             if (apiKey.isNotBlank()) {
                 put("api_key", apiKey)
             }
@@ -92,9 +105,15 @@ class MayaNetworkClient(
                         val json = JSONObject(responseBodyString)
                         val text = json.optString("text", "No textual reply received.")
                         val audioUrl = json.optString("audioUrl", "")
+                        val actionJson =
+                            if (json.has("action") && !json.isNull("action")) {
+                                json.optJSONObject("action")
+                            } else {
+                                null
+                            }
 
                         mainHandler.post {
-                            onSuccess(text, audioUrl)
+                            onSuccess(text, audioUrl, actionJson)
                         }
                     } catch (e: Exception) {
                         mainHandler.post {

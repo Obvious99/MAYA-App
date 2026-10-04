@@ -2,8 +2,13 @@ package com.maya.assistant
 
 import android.Manifest
 import android.content.Intent
+import android.content.ContentResolver
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.location.Location
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
@@ -95,9 +100,24 @@ enum class MayaState {
     ERROR
 }
 
+private fun encodeImageUriToBase64(uri: Uri): String? {
+    return try {
+        contentResolver.openInputStream(uri)?.use { input ->
+            val bytes = input.readBytes()
+            android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+        }
+    } catch (e: Exception) {
+        println("[!] Image encoding error: ${e.message}")
+        null
+    }
+}
+
 class MainActivity : ComponentActivity(), MayaAudioPlaybackListener {
 
     private lateinit var networkClient: MayaNetworkClient
+    private lateinit var actionExecutor: MayaActionExecutor
+    private var selectedImageUri: String? = null
+    private lateinit var fusedLocationClient: FusedLocationProviderClient
     private var speechRecognizer: SpeechRecognizer? = null
     private var speechIntent: Intent? = null
 
@@ -121,6 +141,16 @@ class MainActivity : ComponentActivity(), MayaAudioPlaybackListener {
         }
     }
 
+    private val requestLocationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted: Boolean ->
+        if (isGranted) {
+            Toast.makeText(this, "Location access granted", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(this, "Location access denied", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     private val overlayPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
@@ -137,6 +167,29 @@ class MainActivity : ComponentActivity(), MayaAudioPlaybackListener {
         super.onCreate(savedInstanceState)
 
         networkClient = MayaNetworkClient(this, this)
+        actionExecutor = MayaActionExecutor(this)
+        val imagePickerLauncher = registerForActivityResult(
+            androidx.activity.result.contract.ActivityResultContracts.GetContent()
+        ) { uri ->
+            if (uri != null) {
+                mayaResponse.value = "Image selected. Vision analysis pipeline ready."
+                selectedImageUri = uri.toString()
+            }
+        }
+
+        actionExecutor.onImagePickerRequested = {
+            runOnUiThread {
+                imagePickerLauncher.launch("image/*")
+            }
+        }
+
+        actionExecutor.onCameraRequested = {
+            runOnUiThread {
+                val cameraIntent = Intent("android.media.action.IMAGE_CAPTURE")
+                startActivity(cameraIntent)
+            }
+        }
+        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
 
         checkAndRequestPermissions()
 
@@ -180,6 +233,34 @@ class MainActivity : ComponentActivity(), MayaAudioPlaybackListener {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
             // Can be requested explicitly in Settings
         }
+
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestLocationPermissionLauncher.launch(Manifest.permission.ACCESS_COARSE_LOCATION)
+        }
+    }
+
+    private fun getMayaLocation(onResult: (Location?) -> Unit) {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            onResult(null)
+            return
+        }
+
+        val request = com.google.android.gms.location.CurrentLocationRequest.Builder()
+            .setPriority(Priority.PRIORITY_BALANCED_POWER_ACCURACY)
+            .setMaxUpdateAgeMillis(5000)
+            .build()
+
+        fusedLocationClient.getCurrentLocation(request, null)
+            .addOnSuccessListener { location ->
+                onResult(location)
+            }
+            .addOnFailureListener {
+                onResult(null)
+            }
     }
 
     private fun requestOverlayPermission() {
@@ -299,30 +380,68 @@ class MainActivity : ComponentActivity(), MayaAudioPlaybackListener {
         val model = prefs.getGeminiModel()
         val apiKey = prefs.getApiKey()
 
-        networkClient.sendChatRequest(
-            url = serverUrl,
-            message = query,
-            model = model,
-            apiKey = apiKey,
-            onSuccess = { responseText, audioUrl ->
-                runOnUiThread {
-                    mayaResponse.value = responseText
-                    if (audioUrl.isNotBlank()) {
-                        currentState.value = MayaState.SPEAKING
-                        val baseUrl = extractBaseUrl(serverUrl)
-                        networkClient.playAudioStream("$baseUrl$audioUrl")
-                    } else {
-                        currentState.value = MayaState.IDLE
+        val imageBase64 = selectedImageUri
+            ?.let { Uri.parse(it) }
+            ?.let { encodeImageUriToBase64(it) }
+
+        getMayaLocation { location ->
+            networkClient.sendChatRequest(
+                url = serverUrl,
+                message = query,
+                model = model,
+                apiKey = apiKey,
+                latitude = location?.latitude,
+                longitude = location?.longitude,
+                imageUri = selectedImageUri,
+                imageBase64 = imageBase64,
+                onSuccess = { responseText, audioUrl, action ->
+                    runOnUiThread {
+                        mayaResponse.value = responseText
+
+                        if (action != null) {
+                            val result = actionExecutor.execute(
+                                type = action.optString("type"),
+                                url = action.optString("url").takeIf { it.isNotBlank() },
+                                query = action.optString("query").takeIf { it.isNotBlank() },
+                                phone = action.optString("phone").takeIf { it.isNotBlank() },
+                                message = action.optString("message").takeIf { it.isNotBlank() },
+                                reminderText = action.optString("reminderText").takeIf { it.isNotBlank() },
+                                hour = if (action.has("hour")) action.optInt("hour") else null,
+                                minute = if (action.has("minute")) action.optInt("minute") else null,
+                                title = action.optString("title").takeIf { it.isNotBlank() },
+                                content = (
+                                    action.optString("response")
+                                        .takeIf { it.isNotBlank() }
+                                        ?: action.optString("content").takeIf { it.isNotBlank() }
+                                ),
+                                result = action.optString("result").takeIf { it.isNotBlank() },
+                                file = action.optString("file").takeIf { it.isNotBlank() }
+                            )
+
+                            if (!result.success) {
+                                mayaResponse.value =
+                                    if (responseText.isBlank()) result.message
+                                    else "$responseText\n${result.message}"
+                            }
+                        }
+
+                        if (audioUrl.isNotBlank()) {
+                            currentState.value = MayaState.SPEAKING
+                            val baseUrl = extractBaseUrl(serverUrl)
+                            networkClient.playAudioStream("$baseUrl$audioUrl")
+                        } else {
+                            currentState.value = MayaState.IDLE
+                        }
+                    }
+                },
+                onError = { errorMessage ->
+                    runOnUiThread {
+                        currentState.value = MayaState.ERROR
+                        mayaResponse.value = errorMessage
                     }
                 }
-            },
-            onError = { errorMessage ->
-                runOnUiThread {
-                    currentState.value = MayaState.ERROR
-                    mayaResponse.value = errorMessage
-                }
-            }
-        )
+            )
+        }
     }
 
     private fun extractBaseUrl(fullUrl: String): String {

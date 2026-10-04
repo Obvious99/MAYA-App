@@ -1,0 +1,21 @@
+.gradle/
+**/.gradle/
+build/
+**/build/
+__pycache__/
+*.pyc
+*.backup_*
+.env
+
+# MAYA runtime/generated files
+termux/generated/
+termux/static/
+termux/server.log
+termux/memory.json
+termux/avatar.png
+
+# Local backup/source snapshots
+**/*functional_backup*.kt
+**/*original_MainActivity*.kt
+**/*old_MainActivity*.kt
+termux/server.py.before_actions
