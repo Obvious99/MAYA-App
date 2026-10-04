@@ -170,7 +170,7 @@ class FloatingOverlayService : Service(), MayaAudioPlaybackListener {
             message = query,
             model = model,
             apiKey = apiKey,
-            onSuccess = { _, audioUrl ->
+            onSuccess = { _, audioUrl, _ ->
                 mainHandler.post {
                     isProcessing = false
                     if (audioUrl.isNotBlank()) {

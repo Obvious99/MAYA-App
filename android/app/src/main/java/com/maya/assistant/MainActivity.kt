@@ -100,7 +100,10 @@ enum class MayaState {
     ERROR
 }
 
-private fun encodeImageUriToBase64(uri: Uri): String? {
+private fun encodeImageUriToBase64(
+    contentResolver: ContentResolver,
+    uri: Uri
+): String? {
     return try {
         contentResolver.openInputStream(uri)?.use { input ->
             val bytes = input.readBytes()
@@ -382,7 +385,7 @@ class MainActivity : ComponentActivity(), MayaAudioPlaybackListener {
 
         val imageBase64 = selectedImageUri
             ?.let { Uri.parse(it) }
-            ?.let { encodeImageUriToBase64(it) }
+            ?.let { encodeImageUriToBase64(contentResolver, it) }
 
         getMayaLocation { location ->
             networkClient.sendChatRequest(
