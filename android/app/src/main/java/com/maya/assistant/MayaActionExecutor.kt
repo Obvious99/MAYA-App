@@ -63,26 +63,27 @@ class MayaActionExecutor(private val context: Context) {
 
                 "YOUTUBE" -> {
                     val youtubeUrl = url?.trim()
-                    val youtubeQuery = query?.trim()
 
-                    val targetUrl = when {
-                        !youtubeUrl.isNullOrBlank() -> youtubeUrl
-                        !youtubeQuery.isNullOrBlank() ->
-                            "https://www.youtube.com/results?search_query=" +
-                                Uri.encode(youtubeQuery)
-                        else -> null
-                    }
-
-                    if (targetUrl.isNullOrBlank()) {
-                        ActionResult(false, "YouTube URL or search query is missing.")
+                    if (youtubeUrl.isNullOrBlank()) {
+                        ActionResult(false, "A direct YouTube video URL is required.")
                     } else {
                         val intent = Intent(
                             Intent.ACTION_VIEW,
-                            Uri.parse(targetUrl)
-                        )
-                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        context.startActivity(intent)
-                        ActionResult(true, "YouTube opened.")
+                            Uri.parse(youtubeUrl)
+                        ).apply {
+                            setPackage("app.revanced.android.youtube")
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+
+                        try {
+                            context.startActivity(intent)
+                            ActionResult(true, "ReVanced YouTube opened.")
+                        } catch (e: Exception) {
+                            ActionResult(
+                                false,
+                                "ReVanced YouTube could not open the video URL."
+                            )
+                        }
                     }
                 }
 
